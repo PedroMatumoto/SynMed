@@ -1,4 +1,4 @@
-# 📌 Sistema de Apoio à Identificação de Efeitos Colaterais de Medicamentos
+# 📌 SynMed - Sistema de Apoio à Identificação de Efeitos Colaterais de Medicamentos
 
 Este projeto tem como objetivo **auxiliar na identificação de possíveis efeitos colaterais de medicamentos** a partir de sintomas relatados por usuários.
 
