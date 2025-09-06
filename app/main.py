@@ -5,6 +5,8 @@ import numpy as np
 import re
 from typing import List, Tuple, Dict
 
+from app.data_op import treat_realistic_drugs
+
 
 @st.cache_resource
 def load_model():
@@ -16,11 +18,12 @@ def load_drug_data():
         drug_names = pd.read_csv('data/drug_names.csv', sep=';', header=None, names=['CID', 'drug_name'])
         
         realistic_drugs = pd.read_csv('data/realistic_drug_labels_side_effects.csv')
+        treated_realistic_drugs = treat_realistic_drugs(realistic_drugs)
         
         sider_data = pd.read_csv('data/meddra_all_se.csv', sep=';', header=None, 
                                 names=['CID', 'STITCH_ID', 'UMLS_ID', 'MedDRA_type', 'UMLS_ID2', 'side_effect'])
-        
-        return drug_names, realistic_drugs, sider_data
+
+        return drug_names, treated_realistic_drugs, sider_data
     except Exception as e:
         st.error(f"Error loading data: {e}")
         return None, None, None
@@ -168,11 +171,11 @@ if st.button("🔍 Verificar Efeito Colateral", type="primary"):
                 ai_response = generate_ai_response(selected_drug, effect_input, similarities, drug_info)
                 
                 st.markdown("---")
-                st.markdown("## 🤖 Análise AI")
+                st.markdown("## Análise AI")
                 st.markdown(ai_response)
                 
                 if similarities:
-                    st.markdown("### 📊 Efeitos Colaterais Similares Conhecidos")
+                    st.markdown("### Efeitos Colaterais Similares Conhecidos")
                     for i, (effect, score) in enumerate(similarities[:5]):
                         confidence_color = "🟢" if score > 0.8 else "🟡" if score > 0.6 else "🔴"
                         st.write(f"{confidence_color} **{effect}** - Similaridade: {score:.3f}")
