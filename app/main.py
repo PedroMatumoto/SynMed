@@ -5,12 +5,16 @@ import numpy as np
 import re
 from typing import List, Tuple, Dict
 
-from app.data_op import treat_realistic_drugs
+from data_op import treat_realistic_drugs, semantic_drug_search, load_drug_search_model
 
 
 @st.cache_resource
 def load_model():
     return SentenceTransformer("multi-qa-mpnet-base-cos-v1")
+
+@st.cache_resource  
+def load_drug_model():
+    return load_drug_search_model()
 
 @st.cache_data
 def load_drug_data():
@@ -31,19 +35,25 @@ def load_drug_data():
 def normalize_text(text: str) -> str:
     return re.sub(r'[^\w\s]', '', text.lower().strip())
 
-def find_drug_matches(drug_input: str, drug_names_df: pd.DataFrame, realistic_drugs_df: pd.DataFrame) -> List[str]:
-    normalized_input = normalize_text(drug_input)
-    matches = []
-    
-    for _, row in drug_names_df.iterrows():
-        if normalized_input in normalize_text(row['drug_name']):
-            matches.append(row['drug_name'])
-    
-    for _, row in realistic_drugs_df.iterrows():
-        if normalized_input in normalize_text(row['drug_name']):
-            matches.append(row['drug_name'])
-    
-    return list(set(matches)) 
+def find_drug_matches(drug_input: str, drug_names_df: pd.DataFrame, realistic_drugs_df: pd.DataFrame, 
+                     use_semantic: bool = False, drug_model=None, threshold: float = 0.6) -> List[str]:
+    if use_semantic and drug_model is not None:
+        semantic_results = semantic_drug_search(drug_input, drug_names_df, realistic_drugs_df, 
+                                              drug_model, threshold=threshold, top_k=10)
+        return [drug_name for drug_name, score in semantic_results]
+    else:
+        normalized_input = normalize_text(drug_input)
+        matches = []
+        
+        for _, row in drug_names_df.iterrows():
+            if normalized_input in normalize_text(row['drug_name']):
+                matches.append(row['drug_name'])
+        
+        for _, row in realistic_drugs_df.iterrows():
+            if normalized_input in normalize_text(row['drug_name']):
+                matches.append(row['drug_name'])
+        
+        return list(set(matches)) 
 
 def get_side_effects_for_drug(drug_name: str, realistic_drugs_df: pd.DataFrame, sider_data_df: pd.DataFrame, drug_names_df: pd.DataFrame) -> List[str]:
     side_effects = []
@@ -120,6 +130,7 @@ def generate_ai_response(drug_name: str, user_effect: str, matches: List[Tuple[s
     return response
 
 sentence_model = load_model()
+drug_model = load_drug_model()
 drug_names_df, realistic_drugs_df, sider_data_df = load_drug_data()
 
 if drug_names_df is None:
@@ -128,6 +139,25 @@ if drug_names_df is None:
 
 st.title("💊 SynMed - Verificador de Efeitos Colaterais")
 st.markdown("### Verifique se um sintoma pode ser efeito colateral de um medicamento")
+
+with st.expander("⚙️ Configurações de Busca", expanded=False):
+    use_semantic_search = st.checkbox(
+        "Usar busca semântica para nomes de medicamentos", 
+        value=True,
+        help="Busca por similaridade semântica usando AI ao invés de correspondência exata"
+    )
+    
+    if use_semantic_search:
+        similarity_threshold = st.slider(
+            "Limite de similaridade", 
+            min_value=0.0, 
+            max_value=1.0, 
+            value=0.6, 
+            step=0.1,
+            help="Menor valor = mais resultados, Maior valor = resultados mais precisos"
+        )
+    else:
+        similarity_threshold = 0.6
 
 col1, col2 = st.columns(2)
 
@@ -146,15 +176,26 @@ with col2:
 if st.button("🔍 Verificar Efeito Colateral", type="primary"):
     if drug_input.strip() and effect_input.strip():
         with st.spinner("Analisando..."):
-            drug_matches = find_drug_matches(drug_input, drug_names_df, realistic_drugs_df)
+            drug_matches = find_drug_matches(
+                drug_input, 
+                drug_names_df, 
+                realistic_drugs_df,
+                use_semantic=use_semantic_search,
+                drug_model=drug_model,
+                threshold=similarity_threshold
+            )
             
             if not drug_matches:
-                st.warning(f"Medicamento '{drug_input}' não encontrado na base de dados.")
+                search_type = "semântica" if use_semantic_search else "exata"
+                st.warning(f"Medicamento '{drug_input}' não encontrado na base de dados usando busca {search_type}.")
+                if use_semantic_search:
+                    st.info("💡 Dica: Tente diminuir o limite de similaridade nas configurações ou desabilitar a busca semântica.")
             else:
                 selected_drug = drug_matches[0]
                 
                 if len(drug_matches) > 1:
-                    st.info(f"Encontrados múltiplos medicamentos similares. Usando: {selected_drug}")
+                    search_type = "semânticos" if use_semantic_search else "similares"
+                    st.info(f"Encontrados múltiplos medicamentos {search_type}. Usando: {selected_drug}")
                     with st.expander("Ver todas as correspondências"):
                         for match in drug_matches:
                             st.write(f"- {match}")
