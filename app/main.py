@@ -32,6 +32,19 @@ def load_drug_data():
         st.error(f"Error loading data: {e}")
         return None, None, None
 
+@st.cache_data
+def load_translations():
+    """Carrega o arquivo de traduções de efeitos colaterais"""
+    try:
+        translations_df = pd.read_csv('data/side_effects_translated.csv')
+        # Criar dicionário bidirecional para tradução
+        pt_to_en = dict(zip(translations_df['Traduzido'].str.lower(), translations_df['Original']))
+        en_to_pt = dict(zip(translations_df['Original'].str.lower(), translations_df['Traduzido']))
+        return pt_to_en, en_to_pt
+    except Exception as e:
+        st.warning(f"Aviso: Não foi possível carregar traduções. Usando modo inglês apenas. Erro: {e}")
+        return {}, {}
+
 def normalize_text(text: str) -> str:
     return re.sub(r'[^\w\s]', '', text.lower().strip())
 
@@ -72,11 +85,60 @@ def get_side_effects_for_drug(drug_name: str, realistic_drugs_df: pd.DataFrame, 
     
     return list(set(side_effects))
 
-def check_side_effect_similarity(user_effect: str, known_effects: List[str], model) -> List[Tuple[str, float]]:
-    if not known_effects:
-        return []
+def translate_symptom_to_english(symptom: str, pt_to_en_dict: Dict[str, str], model) -> Tuple[str, List[Tuple[str, float]]]:
+    """
+    Tenta traduzir um sintoma em português para inglês.
+    Retorna a melhor tradução encontrada e possíveis alternativas.
+    """
+    normalized_symptom = normalize_text(symptom)
     
-    user_embedding = model.encode(normalize_text(user_effect), convert_to_tensor=True)
+    # Busca exata no dicionário
+    if normalized_symptom in pt_to_en_dict:
+        return pt_to_en_dict[normalized_symptom], [(pt_to_en_dict[normalized_symptom], 1.0)]
+    
+    # Busca parcial no dicionário
+    partial_matches = []
+    for pt_effect, en_effect in pt_to_en_dict.items():
+        if normalized_symptom in pt_effect or pt_effect in normalized_symptom:
+            partial_matches.append((en_effect, 0.9))
+    
+    if partial_matches:
+        return partial_matches[0][0], partial_matches
+    
+    # Busca semântica se não houver correspondência direta
+    if pt_to_en_dict:
+        symptom_embedding = model.encode(normalized_symptom, convert_to_tensor=True)
+        semantic_matches = []
+        
+        for pt_effect, en_effect in list(pt_to_en_dict.items())[:1000]:  # Limitar para performance
+            effect_embedding = model.encode(normalize_text(pt_effect), convert_to_tensor=True)
+            similarity = util.cos_sim(symptom_embedding, effect_embedding).item()
+            if similarity > 0.5:
+                semantic_matches.append((en_effect, similarity))
+        
+        if semantic_matches:
+            semantic_matches.sort(key=lambda x: x[1], reverse=True)
+            return semantic_matches[0][0], semantic_matches[:5]
+    
+    # Se não encontrar tradução, retorna o original
+    return symptom, []
+
+def check_side_effect_similarity(user_effect: str, known_effects: List[str], model, pt_to_en_dict: Dict[str, str] = None, en_to_pt_dict: Dict[str, str] = None) -> Tuple[List[Tuple[str, float]], str, List[Tuple[str, float]]]:
+    """
+    Verifica similaridade de efeitos colaterais, suportando entrada em português.
+    Retorna: (similaridades, efeito_traduzido, possíveis_traduções)
+    """
+    if not known_effects:
+        return [], user_effect, []
+    
+    # Tenta traduzir sintoma em português para inglês
+    translated_effect = user_effect
+    possible_translations = []
+    
+    if pt_to_en_dict:
+        translated_effect, possible_translations = translate_symptom_to_english(user_effect, pt_to_en_dict, model)
+    
+    user_embedding = model.encode(normalize_text(translated_effect), convert_to_tensor=True)
     similarities = []
     
     for effect in known_effects:
@@ -85,13 +147,23 @@ def check_side_effect_similarity(user_effect: str, known_effects: List[str], mod
             similarity = util.cos_sim(user_embedding, effect_embedding).item()
             similarities.append((effect, similarity))
     
-    return sorted(similarities, key=lambda x: x[1], reverse=True)
+    return sorted(similarities, key=lambda x: x[1], reverse=True), translated_effect, possible_translations
 
-def generate_ai_response(drug_name: str, user_effect: str, matches: List[Tuple[str, float]], drug_info: Dict) -> str:
+def generate_ai_response(drug_name: str, user_effect: str, matches: List[Tuple[str, float]], drug_info: Dict, 
+                        translated_effect: str = None, possible_translations: List[Tuple[str, float]] = None,
+                        en_to_pt_dict: Dict[str, str] = None) -> str:
+    """Gera resposta AI com suporte a traduções"""
+    
+    translation_info = ""
+    if translated_effect and translated_effect.lower() != user_effect.lower():
+        translation_info = f"\n**Sintoma informado:** {user_effect}\n**Tradução detectada:** {translated_effect}\n"
+        if possible_translations and len(possible_translations) > 1:
+            translation_info += f"**Traduções alternativas consideradas:** {', '.join([t[0] for t in possible_translations[:3]])}\n"
+    
     if not matches:
         return f"""
         **Análise:** Não encontrei o efeito '{user_effect}' como um efeito colateral documentado para {drug_name} em nossa base de dados.
-        
+        {translation_info}
         **Recomendação:** Isso não significa que o efeito não possa estar relacionado ao medicamento. Reações individuais podem variar. 
         Recomendo consultar um médico ou farmacêutico para uma avaliação mais detalhada.
         
@@ -100,6 +172,7 @@ def generate_ai_response(drug_name: str, user_effect: str, matches: List[Tuple[s
     
     best_match = matches[0]
     similarity_score = best_match[1]
+    best_match_pt = en_to_pt_dict.get(best_match[0].lower(), best_match[0]) if en_to_pt_dict else best_match[0]
     
     if similarity_score > 0.8:
         confidence = "Alta"
@@ -113,8 +186,8 @@ def generate_ai_response(drug_name: str, user_effect: str, matches: List[Tuple[s
     
     response = f"""
     **Análise:** Encontrei uma correspondência com efeitos conhecidos de {drug_name}.
-    
-    **Efeito mais similar:** {best_match[0]} (Similaridade: {similarity_score:.2f})
+    {translation_info}
+    **Efeito mais similar:** {best_match_pt} (Similaridade: {similarity_score:.2f})
     **Confiança da análise:** {confidence}
     
     **Informações do medicamento:**
@@ -132,6 +205,7 @@ def generate_ai_response(drug_name: str, user_effect: str, matches: List[Tuple[s
 sentence_model = load_model()
 drug_model = load_drug_model()
 drug_names_df, realistic_drugs_df, sider_data_df = load_drug_data()
+pt_to_en_dict, en_to_pt_dict = load_translations()
 
 if drug_names_df is None:
     st.error("Erro ao carregar dados. Verifique se os arquivos CSV estão no diretório 'data/'.")
@@ -169,8 +243,8 @@ with col1:
 
 with col2:
     effect_input = st.text_input(
-        "Efeito/sintoma observado:",
-        placeholder="Ex: dor de cabeça, náusea, tontura"
+        "Efeito/sintoma observado (em português ou inglês):",
+        placeholder="Ex: dor de cabeça, náusea, tontura, enjoo"
     )
 
 if st.button("🔍 Verificar Efeito Colateral", type="primary"):
@@ -202,14 +276,19 @@ if st.button("🔍 Verificar Efeito Colateral", type="primary"):
                 
                 known_effects = get_side_effects_for_drug(selected_drug, realistic_drugs_df, sider_data_df, drug_names_df)
                 
-                similarities = check_side_effect_similarity(effect_input, known_effects, sentence_model)
+                similarities, translated_effect, possible_translations = check_side_effect_similarity(
+                    effect_input, known_effects, sentence_model, pt_to_en_dict, en_to_pt_dict
+                )
                 
                 drug_info = {}
                 drug_row = realistic_drugs_df[realistic_drugs_df['drug_name'].str.contains(selected_drug, case=False, na=False)]
                 if not drug_row.empty:
                     drug_info = drug_row.iloc[0].to_dict()
                 
-                ai_response = generate_ai_response(selected_drug, effect_input, similarities, drug_info)
+                ai_response = generate_ai_response(
+                    selected_drug, effect_input, similarities, drug_info,
+                    translated_effect, possible_translations, en_to_pt_dict
+                )
                 
                 st.markdown("---")
                 st.markdown("## Análise AI")
@@ -219,13 +298,21 @@ if st.button("🔍 Verificar Efeito Colateral", type="primary"):
                     st.markdown("### Efeitos Colaterais Similares Conhecidos")
                     for i, (effect, score) in enumerate(similarities[:5]):
                         confidence_color = "🟢" if score > 0.8 else "🟡" if score > 0.6 else "🔴"
-                        st.write(f"{confidence_color} **{effect}** - Similaridade: {score:.3f}")
+                        effect_pt = en_to_pt_dict.get(effect.lower(), effect) if en_to_pt_dict else effect
+                        st.write(f"{confidence_color} **{effect_pt}** ({effect}) - Similaridade: {score:.3f}")
                 
                 if known_effects:
                     with st.expander(f"Ver todos os efeitos colaterais conhecidos de {selected_drug}"):
+                        effects_list = []
                         for effect in sorted(set(known_effects)):
                             if effect and str(effect) != 'nan':
-                                st.write(f"• {effect}")
+                                effect_pt = en_to_pt_dict.get(effect.lower(), effect) if en_to_pt_dict else effect
+                                if effect_pt != effect:
+                                    effects_list.append(f"• {effect_pt} ({effect})")
+                                else:
+                                    effects_list.append(f"• {effect}")
+                        for effect_text in effects_list:
+                            st.write(effect_text)
     else:
         st.warning("Por favor, preencha tanto o nome do medicamento quanto o efeito observado.")
 
