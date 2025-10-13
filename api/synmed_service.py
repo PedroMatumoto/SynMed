@@ -6,8 +6,11 @@ import re
 import pickle
 import os
 import hashlib
-from api_models import DrugInfo, SimilarEffect, DrugSearchResult
-from app.gemma_med import GemmaMedClient
+from .api_models import DrugInfo, SimilarEffect, DrugSearchResult
+try:
+    from app.gemma_med import GemmaMedClient
+except ImportError:
+    GemmaMedClient = None
 
 
 class SynMedService:

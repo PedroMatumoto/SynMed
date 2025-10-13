@@ -4,6 +4,7 @@ from typing import Optional, Dict
 import time
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+import os
 
 class GemmaMedClient:
     """Cliente para interagir com o modelo GemmaMed-27B-IT via Hugging Face Inference Endpoint"""
@@ -15,7 +16,7 @@ class GemmaMedClient:
             api_token: Token de API da Hugging Face (opcional, use secrets do Streamlit)
         """
         self.endpoint_url = endpoint_url
-        self.api_token = api_token or st.secrets.get("HUGGINGFACE_API_TOKEN", "")
+        self.api_token = api_token or os.getenv("HUGGINGFACE_API_TOKEN", "")
         self.headers = {
             "Authorization": f"Bearer {self.api_token}",
             "Content-Type": "application/json"
@@ -264,7 +265,7 @@ Seja claro, objetivo e acessível para o público leigo.
 @st.cache_resource
 def get_gemma_client():
     """Inicializa e cacheia o cliente GemmaMed"""
-    endpoint_url = st.secrets.get("HUGGINGFACE_MODEL_API_TOKEN", "")
+    endpoint_url = os.getenv("HUGGINGFACE_MODEL_API_TOKEN", "")
     return GemmaMedClient(endpoint_url)
 
 def check_gemma_availability() -> bool:

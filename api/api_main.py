@@ -3,12 +3,12 @@ from fastapi import FastAPI, HTTPException, Depends, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from beanie import init_beanie
 import motor.motor_asyncio
-from api_models import (
+from .api_models import (
     User, UserCreate, UserLogin, UserResponse, Token, SearchHistory,
     DrugEffectRequest, DrugEffectResponse, SimilarEffect, DrugInfo,
     EffectAnalysisHistory, DrugSearchResult
 )
-from api_auth import (
+from .api_auth import (
     get_password_hash, 
     authenticate_user, 
     create_access_token, 
@@ -17,7 +17,7 @@ from api_auth import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
     get_current_user_optional,
 )
-from synmed_service import get_synmed_service
+from .synmed_service import get_synmed_service
 from dotenv import load_dotenv
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
