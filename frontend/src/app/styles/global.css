@@ -1,0 +1,57 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+.hide-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;  
+}
+
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Remove as setas do input type="number" no Chrome, Safari, Edge */
+input[type='number']::-webkit-inner-spin-button,
+input[type='number']::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* Remove as setas no Firefox */
+input[type='number'] {
+  -moz-appearance: textfield;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-dark-100;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-dark-400 rounded-full;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-dark-500;
+}
+
+/* Smooth focus styles */
+input:focus, textarea:focus, select:focus {
+  outline: 2px solid theme('colors.accent');
+  outline-offset: 2px;
+}
+
+/* Custom checkbox styles */
+input[type="checkbox"] {
+  @apply appearance-none h-5 w-5 border-2 border-dark-300 rounded bg-white checked:bg-accent checked:border-accent relative cursor-pointer transition-all duration-200;
+}
+
+input[type="checkbox"]:checked::after {
+  content: '✓';
+  @apply absolute inset-0 flex items-center justify-center text-white text-sm font-bold;
+}

@@ -256,20 +256,22 @@ class SynMedService:
         
         return DrugInfo()
     
-    def translate_symptom_to_english(self, symptom: str) -> Tuple[str, List[Tuple[str, float]]]:
+    def translate_symptom_to_english(self, symptom: str) -> Tuple[str, List[Dict[str, float]]]:
         """Traduz sintoma em português para inglês"""
         normalized_symptom = self._normalize_text(symptom)
         
         if normalized_symptom in self._pt_to_en_dict:
-            return self._pt_to_en_dict[normalized_symptom], [(self._pt_to_en_dict[normalized_symptom], 1.0)]
+            return self._pt_to_en_dict[normalized_symptom], [{self._pt_to_en_dict[normalized_symptom]: 1.0}]
         
         partial_matches = []
         for pt_effect, en_effect in self._pt_to_en_dict.items():
             if normalized_symptom in pt_effect or pt_effect in normalized_symptom:
-                partial_matches.append((en_effect, 0.9))
+                partial_matches.append({en_effect: 0.9})
         
         if partial_matches:
-            return partial_matches[0][0], partial_matches
+            # Get the first match's key for the return string
+            first_match_key = list(partial_matches[0].keys())[0]
+            return first_match_key, partial_matches
         
         if self._pt_to_en_dict and self._sentence_model:
             symptom_embedding = self._sentence_model.encode(normalized_symptom, convert_to_tensor=True)
@@ -279,15 +281,17 @@ class SynMedService:
                 effect_embedding = self._sentence_model.encode(self._normalize_text(pt_effect), convert_to_tensor=True)
                 similarity = util.cos_sim(symptom_embedding, effect_embedding).item()
                 if similarity > 0.5:
-                    semantic_matches.append((en_effect, similarity))
+                    semantic_matches.append({en_effect: similarity})
             
             if semantic_matches:
-                semantic_matches.sort(key=lambda x: x[1], reverse=True)
-                return semantic_matches[0][0], semantic_matches[:5]
+                semantic_matches.sort(key=lambda x: list(x.values())[0], reverse=True)
+                # Get the first match's key for the return string
+                first_match_key = list(semantic_matches[0].keys())[0]
+                return first_match_key, semantic_matches[:5]
         
         return symptom, []
     
-    def check_side_effect_similarity(self, user_effect: str, known_effects: List[str]) -> Tuple[List[SimilarEffect], str, List[Tuple[str, float]]]:
+    def check_side_effect_similarity(self, user_effect: str, known_effects: List[str]) -> Tuple[List[SimilarEffect], str, List[Dict[str, float]]]:
         """Verifica similaridade de efeitos colaterais"""
         if not known_effects:
             return [], user_effect, []
@@ -322,13 +326,17 @@ class SynMedService:
     
     def generate_basic_analysis(self, drug_name: str, user_effect: str, similar_effects: List[SimilarEffect], 
                                drug_info: DrugInfo, translated_effect: str = None, 
-                               possible_translations: List[Tuple[str, float]] = None) -> str:
+                               possible_translations: List[Dict[str, float]] = None) -> str:
         """Gera análise básica baseada em dados"""
         translation_info = ""
         if translated_effect and translated_effect.lower() != user_effect.lower():
             translation_info = f"\n**Sintoma informado:** {user_effect}\n**Tradução detectada:** {translated_effect}\n"
             if possible_translations and len(possible_translations) > 1:
-                translation_info += f"**Traduções alternativas consideradas:** {', '.join([t[0] for t in possible_translations[:3]])}\n"
+                # Extract translation names from dictionaries
+                translation_names = []
+                for translation_dict in possible_translations[:3]:
+                    translation_names.extend(translation_dict.keys())
+                translation_info += f"**Traduções alternativas consideradas:** {', '.join(translation_names)}\n"
         
         if not similar_effects:
             return f"""
