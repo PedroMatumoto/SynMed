@@ -3,7 +3,8 @@ import {
   DrugEffectRequest,
   DrugEffectResponse,
   DrugSearchResult,
-  EffectAnalysisHistory
+  EffectAnalysisHistory,
+  ExtractedSymptom
 } from '../types/analysis'
 import { environments } from '@/utils/env/environments'
 import { useAuth } from './authContext'
@@ -16,6 +17,7 @@ interface AnalysisContextType {
   error: string | null
   toasts: ReturnType<typeof useToast>
   searchDrugs: (query: string, useSemanticSearch?: boolean) => Promise<DrugSearchResult[]>
+  extractSymptoms: (text: string) => Promise<ExtractedSymptom[]>
   analyzeEffect: (request: DrugEffectRequest) => Promise<void>
   fetchHistory: () => Promise<void>
   clearHistory: () => Promise<void>
@@ -60,6 +62,33 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
 
       if (!response.ok) {
         throw new Error('Erro ao buscar medicamentos')
+      }
+
+      return await response.json()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Erro desconhecido')
+      return []
+    }
+  }
+
+  async function extractSymptoms(text: string): Promise<ExtractedSymptom[]> {
+    try {
+      const headers: HeadersInit = {
+        'Content-Type': 'application/json'
+      }
+
+      if (user?.access_token) {
+        headers['Authorization'] = `Bearer ${user.access_token}`
+      }
+
+      const response = await fetch(`${environments.apiUrl}/extract-symptoms`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ text: text })
+      })
+
+      if (!response.ok) {
+        throw new Error('Erro ao extrair sintomas')
       }
 
       return await response.json()
@@ -194,6 +223,7 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
         error,
         toasts,
         searchDrugs,
+        extractSymptoms,
         analyzeEffect,
         fetchHistory,
         clearHistory,

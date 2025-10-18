@@ -63,6 +63,8 @@ class SearchHistory(Document):
 class DrugEffectRequest(BaseModel):
     drug_name: str
     effect_symptom: str
+    symptoms: Optional[List[str]] = None
+    natural_language_text: Optional[str] = None
     use_semantic_search: bool = True
     similarity_threshold: float = 0.6
     use_gemma_analysis: bool = True
@@ -72,6 +74,20 @@ class SimilarEffect(BaseModel):
     effect: str
     similarity_score: float
     effect_pt: Optional[str] = None
+
+
+class SymptomAnalysis(BaseModel):
+    original_symptom: str
+    translated_symptom: Optional[str] = None
+    similar_effects: List[SimilarEffect]
+    confidence: str
+    similarity_score: float
+    
+    
+class ExtractedSymptom(BaseModel):
+    text: str
+    confidence_score: float
+    source_span: str 
 
 
 class DrugInfo(BaseModel):
@@ -92,6 +108,9 @@ class DrugEffectResponse(BaseModel):
     basic_analysis: str
     gemma_analysis: Optional[str] = None
     all_known_effects: Optional[List[str]] = None
+    extracted_symptoms: Optional[List[ExtractedSymptom]] = None
+    symptom_analyses: Optional[List[SymptomAnalysis]] = None
+    overall_confidence: Optional[str] = None  # Confiança considerando todos os sintomas
 
 
 class DrugSearchResult(BaseModel):
@@ -104,8 +123,12 @@ class EffectAnalysisHistory(Document):
     user_id: str
     drug_name: str
     effect_symptom: str
+    symptoms: Optional[List[str]] = None
+    extracted_symptoms: Optional[List[ExtractedSymptom]] = None
+    natural_language_input: Optional[str] = None
     confidence: str
     similarity_score: float
+    overall_confidence: Optional[str] = None
     use_semantic_search: bool
     use_gemma_analysis: bool
     timestamp: datetime = datetime.utcnow()

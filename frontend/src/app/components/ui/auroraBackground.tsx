@@ -70,13 +70,13 @@ export default function AuroraBackground({ children, className = '' }: AuroraBac
   }, [])
 
   return (
-    <div className={`relative overflow-hidden ${className}`}>
+    <div className={`relative overflow-hidden w-full h-full ${className}`}>
       <canvas
         ref={canvasRef}
         className="absolute inset-0 h-full w-full"
         style={{ background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%)' }}
       />
-      <div className="relative z-10">{children}</div>
+      <div className="relative z-10 w-full h-full flex items-center justify-center">{children}</div>
     </div>
   )
 }

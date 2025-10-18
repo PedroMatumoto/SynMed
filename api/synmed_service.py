@@ -6,7 +6,8 @@ import re
 import pickle
 import os
 import hashlib
-from .api_models import DrugInfo, SimilarEffect, DrugSearchResult
+from .api_models import DrugInfo, SimilarEffect, DrugSearchResult, SymptomAnalysis, ExtractedSymptom
+from .symptom_extractor import get_symptom_extractor
 try:
     from app.gemma_med import GemmaMedClient
 except ImportError:
@@ -25,6 +26,7 @@ class SynMedService:
         self._pt_to_en_dict = {}
         self._en_to_pt_dict = {}
         self._gemma_client = None
+        self._symptom_extractor = None
         self._initialize_models_and_data()
     
     def _initialize_models_and_data(self):
@@ -35,6 +37,12 @@ class SynMedService:
             
             self._load_drug_data()
             self._load_translations()
+            
+            try:
+                self._symptom_extractor = get_symptom_extractor()
+            except Exception as e:
+                print(f"Aviso: Não foi possível inicializar extrator de sintomas: {e}")
+                self._symptom_extractor = None
             
             try:
                 import os
@@ -395,6 +403,164 @@ Recomendo consultar um médico ou farmacêutico para uma avaliação mais detalh
             drug_info=drug_info_dict,
             similarity_score=similarity_score,
             translated_symptom=translated_symptom
+        )
+    
+    def extract_symptoms_from_text(self, text: str) -> List[ExtractedSymptom]:
+        """Extrai sintomas de um texto em linguagem natural"""
+        if not self._symptom_extractor:
+            return []
+        
+        return self._symptom_extractor.extract_symptoms_from_text(text)
+    
+    def analyze_multiple_symptoms(self, drug_name: str, symptoms: List[str], known_effects: List[str]) -> Tuple[List[SymptomAnalysis], str, float]:
+        """Analisa múltiplos sintomas simultaneamente"""
+        if not symptoms:
+            return [], "Baixa", 0.0
+        
+        symptom_analyses = []
+        total_confidence_score = 0.0
+        
+        for symptom in symptoms:
+            similar_effects, translated_effect, possible_translations = self.check_side_effect_similarity(
+                symptom, known_effects
+            )
+            
+            if similar_effects:
+                similarity_score = similar_effects[0].similarity_score
+                if similarity_score > 0.8:
+                    confidence = "Alta"
+                    confidence_numeric = 3
+                elif similarity_score > 0.6:
+                    confidence = "Moderada"
+                    confidence_numeric = 2
+                else:
+                    confidence = "Baixa"
+                    confidence_numeric = 1
+            else:
+                similarity_score = 0.0
+                confidence = "Baixa"
+                confidence_numeric = 1
+            
+            symptom_analyses.append(SymptomAnalysis(
+                original_symptom=symptom,
+                translated_symptom=translated_effect if translated_effect != symptom else None,
+                similar_effects=similar_effects,
+                confidence=confidence,
+                similarity_score=similarity_score
+            ))
+            
+            total_confidence_score += confidence_numeric
+        
+        average_confidence = total_confidence_score / len(symptoms)
+        if average_confidence >= 2.5:
+            overall_confidence = "Alta"
+        elif average_confidence >= 1.5:
+            overall_confidence = "Moderada"
+        else:
+            overall_confidence = "Baixa"
+        
+        avg_similarity = sum(analysis.similarity_score for analysis in symptom_analyses) / len(symptom_analyses)
+        
+        return symptom_analyses, overall_confidence, avg_similarity
+    
+    def generate_multi_symptom_analysis(self, drug_name: str, symptom_analyses: List[SymptomAnalysis], 
+                                       drug_info: DrugInfo, overall_confidence: str) -> str:
+        """Gera análise básica para múltiplos sintomas"""
+        if not symptom_analyses:
+            return f"""
+**Análise:** Nenhum sintoma foi fornecido para análise com {drug_name}.
+
+**Recomendação:** Por favor, forneça os sintomas que você está experienciando para uma análise adequada.
+
+**⚠️ Importante:** Este sistema é apenas informativo e não substitui orientação médica profissional.
+            """
+        
+        symptoms_with_matches = [s for s in symptom_analyses if s.similar_effects]
+        symptoms_without_matches = [s for s in symptom_analyses if not s.similar_effects]
+        
+        analysis_parts = []
+        
+        analysis_parts.append(f"**Análise de Múltiplos Sintomas para {drug_name}:**")
+        analysis_parts.append(f"**Total de sintomas analisados:** {len(symptom_analyses)}")
+        analysis_parts.append(f"**Confiança geral:** {overall_confidence}")
+        
+        if symptoms_with_matches:
+            analysis_parts.append(f"\n**✅ Sintomas com correspondências encontradas ({len(symptoms_with_matches)}):**")
+            for i, symptom in enumerate(symptoms_with_matches[:5], 1):  # Limitar a 5 para não ficar muito longo
+                best_match = symptom.similar_effects[0] if symptom.similar_effects else None
+                if best_match:
+                    match_display = best_match.effect_pt or best_match.effect
+                    analysis_parts.append(
+                        f"  {i}. **{symptom.original_symptom}** → {match_display} "
+                        f"(Similaridade: {symptom.similarity_score:.2f}, Confiança: {symptom.confidence})"
+                    )
+        
+        if symptoms_without_matches:
+            analysis_parts.append(f"\n**❓ Sintomas sem correspondências diretas ({len(symptoms_without_matches)}):**")
+            for i, symptom in enumerate(symptoms_without_matches[:3], 1):  # Limitar a 3
+                analysis_parts.append(f"  {i}. {symptom.original_symptom}")
+        
+        analysis_parts.append("\n**Recomendações:**")
+        if overall_confidence == "Alta":
+            analysis_parts.append(
+                "Vários dos sintomas relatados têm correspondências bem documentadas com efeitos colaterais conhecidos deste medicamento. "
+                "Considere consultar um médico se os sintomas persistirem ou piorarem."
+            )
+        elif overall_confidence == "Moderada":
+            analysis_parts.append(
+                "Alguns dos sintomas podem estar relacionados ao medicamento. Monitore os sintomas e consulte um profissional "
+                "de saúde se houver preocupações ou se os sintomas se agravarem."
+            )
+        else:
+            analysis_parts.append(
+                "A maioria dos sintomas relatados não tem correspondências diretas com efeitos colaterais conhecidos deste medicamento. "
+                "Isso não exclui uma possível relação. Consulte um médico para avaliação adequada."
+            )
+        
+        if drug_info and (drug_info.drug_class or drug_info.indications):
+            analysis_parts.append(f"\n**Informações do Medicamento:**")
+            if drug_info.drug_class:
+                analysis_parts.append(f"- Classe: {drug_info.drug_class}")
+            if drug_info.indications:
+                analysis_parts.append(f"- Indicações: {drug_info.indications}")
+            if drug_info.side_effect_severity:
+                analysis_parts.append(f"- Severidade típica: {drug_info.side_effect_severity}")
+        
+        analysis_parts.append("\n**⚠️ Importante:** Este sistema é apenas informativo e não substitui orientação médica profissional.")
+        
+        return "\n".join(analysis_parts)
+    
+    def generate_multi_symptom_gemma_analysis(self, drug_name: str, symptom_analyses: List[SymptomAnalysis], 
+                                             drug_info: DrugInfo, overall_confidence: str) -> Optional[str]:
+        """Gera análise usando GemmaMed para múltiplos sintomas"""
+        if not self._gemma_client or not symptom_analyses:
+            return None
+        
+        symptoms_text = ", ".join([s.original_symptom for s in symptom_analyses])
+        
+        all_matches = []
+        for analysis in symptom_analyses:
+            if analysis.similar_effects:
+                all_matches.extend([(effect.effect, effect.similarity_score) for effect in analysis.similar_effects[:2]])
+        
+        all_matches.sort(key=lambda x: x[1], reverse=True)
+        matched_effects = all_matches[:5]
+        
+        drug_info_dict = {
+            'drug_class': drug_info.drug_class,
+            'indications': drug_info.indications,
+            'side_effect_severity': drug_info.side_effect_severity
+        }
+        
+        avg_score = sum(s.similarity_score for s in symptom_analyses) / len(symptom_analyses)
+        
+        return self._gemma_client.generate_enriched_analysis(
+            drug_name=drug_name,
+            user_symptom=symptoms_text,
+            matched_effects=matched_effects,
+            drug_info=drug_info_dict,
+            similarity_score=avg_score,
+            translated_symptom=None
         )
 
 

@@ -10,7 +10,11 @@ import {
   faSignOutAlt,
   faHistory,
   faCalendarAlt,
-  faChartBar
+  faChartBar,
+  faFileText,
+  faStethoscope,
+  faBrain,
+  faStar
 } from '@fortawesome/free-solid-svg-icons'
 
 export default function HistoryPage() {
@@ -117,7 +121,7 @@ export default function HistoryPage() {
 
             {/* Stats Cards */}
             {analysisHistory.length > 0 && (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
                 <div className="rounded-xl bg-white/80 backdrop-blur-sm border border-dark-200 p-6 shadow-lg">
                   <div className="flex items-center gap-3">
                     <div className="rounded-lg bg-blue-500/10 p-2">
@@ -151,7 +155,27 @@ export default function HistoryPage() {
                     </div>
                     <div>
                       <p className="text-2xl font-bold text-dark-800">
-                        {analysisHistory.filter(item => item.confidence === 'Alta').length}
+                        {analysisHistory.reduce((total, item) => {
+                          const extractedCount = item.extracted_symptoms?.length || 0
+                          const symptomsCount = item.symptoms?.length || 0
+                          return total + Math.max(extractedCount, symptomsCount, 1)
+                        }, 0)}
+                      </p>
+                      <p className="text-dark-600 text-sm">Total de sintomas</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-xl bg-white/80 backdrop-blur-sm border border-dark-200 p-6 shadow-lg">
+                  <div className="flex items-center gap-3">
+                    <div className="rounded-lg bg-amber-500/10 p-2">
+                      <FontAwesomeIcon icon={faChartBar} className="text-amber-600" />
+                    </div>
+                    <div>
+                      <p className="text-2xl font-bold text-dark-800">
+                        {analysisHistory.filter(item => 
+                          item.confidence === 'Alta' || item.overall_confidence === 'Alta'
+                        ).length}
                       </p>
                       <p className="text-dark-600 text-sm">Alta confiança</p>
                     </div>
@@ -199,39 +223,129 @@ export default function HistoryPage() {
                           <h3 className="text-2xl font-bold text-dark-800">
                             {item.drug_name}
                           </h3>
-                          <span
-                            className={`inline-flex items-center rounded-full px-3 py-1 text-sm font-bold border ${
-                              item.confidence === 'Alta'
-                                ? 'bg-green-50 text-green-700 border-green-200'
-                                : item.confidence === 'Moderada'
-                                  ? 'bg-yellow-50 text-yellow-700 border-yellow-200'
-                                  : 'bg-red-50 text-red-700 border-red-200'
-                            }`}
-                          >
-                            Confiança: {item.confidence}
-                          </span>
+                          <div className="flex gap-2">
+                            <span
+                              className={`inline-flex items-center rounded-full px-3 py-1 text-sm font-bold border ${
+                                item.confidence === 'Alta'
+                                  ? 'bg-green-50 text-green-700 border-green-200'
+                                  : item.confidence === 'Moderada'
+                                    ? 'bg-yellow-50 text-yellow-700 border-yellow-200'
+                                    : 'bg-red-50 text-red-700 border-red-200'
+                              }`}
+                            >
+                              Confiança: {item.confidence}
+                            </span>
+                            {item.overall_confidence && item.overall_confidence !== item.confidence && (
+                              <span
+                                className={`inline-flex items-center rounded-full px-3 py-1 text-sm font-bold border ${
+                                  item.overall_confidence === 'Alta'
+                                    ? 'bg-blue-50 text-blue-700 border-blue-200'
+                                    : item.overall_confidence === 'Moderada'
+                                      ? 'bg-orange-50 text-orange-700 border-orange-200'
+                                      : 'bg-red-50 text-red-700 border-red-200'
+                                }`}
+                              >
+                                Geral: {item.overall_confidence}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                        <div className="rounded-lg bg-dark-50 p-4">
-                          <p className="font-semibold text-dark-800 mb-1">Sintoma Relatado:</p>
-                          <p className="text-dark-700">{item.effect_symptom}</p>
-                        </div>
-
-                        <div className="rounded-lg bg-dark-50 p-4">
-                          <p className="font-semibold text-dark-800 mb-1">Score de Similaridade:</p>
-                          <div className="flex items-center gap-2">
-                            <div className="flex-1 h-2 bg-dark-200 rounded-full overflow-hidden">
-                              <div 
-                                className="h-full bg-gradient-to-r from-accent to-accent/80 rounded-full transition-all duration-1000"
-                                style={{ width: `${item.similarity_score * 100}%` }}
-                              />
+                      <div className="grid grid-cols-1 gap-4 mb-4">
+                        {/* Texto original em linguagem natural */}
+                        {item.natural_language_input && (
+                          <div className="rounded-lg bg-blue-50 p-4 border border-blue-200">
+                            <div className="flex items-center gap-2 mb-2">
+                              <FontAwesomeIcon icon={faFileText} className="text-blue-600" />
+                              <p className="font-semibold text-blue-800">Texto Original:</p>
                             </div>
-                            <span className="font-bold text-accent">
-                              {(item.similarity_score * 100).toFixed(1)}%
-                            </span>
+                            <p className="text-blue-700 italic">"{item.natural_language_input}"</p>
                           </div>
+                        )}
+
+                        {/* Sintomas extraídos */}
+                        {item.extracted_symptoms && item.extracted_symptoms.length > 0 && (
+                          <div className="rounded-lg bg-green-50 p-4 border border-green-200">
+                            <div className="flex items-center gap-2 mb-2">
+                              <FontAwesomeIcon icon={faBrain} className="text-green-600" />
+                              <p className="font-semibold text-green-800">Sintomas Extraídos:</p>
+                            </div>
+                            <div className="space-y-2">
+                              {item.extracted_symptoms.map((symptom, index) => (
+                                <div key={index} className="flex items-center justify-between bg-white rounded-lg p-2">
+                                  <span className="text-green-700 font-medium">{symptom.text}</span>
+                                  <span className="text-green-600 text-sm bg-green-100 px-2 py-1 rounded">
+                                    {(symptom.confidence_score * 100).toFixed(0)}%
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Lista de sintomas analisados */}
+                        {item.symptoms && item.symptoms.length > 0 && (
+                          <div className="rounded-lg bg-purple-50 p-4 border border-purple-200">
+                            <div className="flex items-center gap-2 mb-2">
+                              <FontAwesomeIcon icon={faStethoscope} className="text-purple-600" />
+                              <p className="font-semibold text-purple-800">Sintomas Analisados:</p>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              {item.symptoms.map((symptom, index) => (
+                                <span 
+                                  key={index}
+                                  className="bg-purple-100 text-purple-700 px-3 py-1 rounded-full text-sm font-medium"
+                                >
+                                  {symptom}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Sintoma relatado (fallback para compatibilidade) */}
+                        {!item.natural_language_input && !item.extracted_symptoms && !item.symptoms && (
+                          <div className="rounded-lg bg-dark-50 p-4">
+                            <p className="font-semibold text-dark-800 mb-1">Sintoma Relatado:</p>
+                            <p className="text-dark-700">{item.effect_symptom}</p>
+                          </div>
+                        )}
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="rounded-lg bg-orange-50 p-4 border border-orange-200">
+                            <p className="font-semibold text-orange-800 mb-1">Score de Similaridade:</p>
+                            <div className="flex items-center gap-2">
+                              <div className="flex-1 h-2 bg-orange-200 rounded-full overflow-hidden">
+                                <div 
+                                  className="h-full bg-gradient-to-r from-orange-500 to-orange-400 rounded-full transition-all duration-1000"
+                                  style={{ width: `${item.similarity_score * 100}%` }}
+                                />
+                              </div>
+                              <span className="font-bold text-orange-600">
+                                {(item.similarity_score * 100).toFixed(1)}%
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Confiança geral */}
+                          {item.overall_confidence && (
+                            <div className="rounded-lg bg-indigo-50 p-4 border border-indigo-200">
+                              <div className="flex items-center gap-2 mb-1">
+                                <FontAwesomeIcon icon={faStar} className="text-indigo-600" />
+                                <p className="font-semibold text-indigo-800">Confiança Geral:</p>
+                              </div>
+                              <span className={`inline-flex items-center rounded-full px-3 py-1 text-sm font-bold ${
+                                item.overall_confidence === 'Alta'
+                                  ? 'bg-green-100 text-green-700'
+                                  : item.overall_confidence === 'Moderada'
+                                    ? 'bg-yellow-100 text-yellow-700'
+                                    : 'bg-red-100 text-red-700'
+                              }`}>
+                                {item.overall_confidence}
+                              </span>
+                            </div>
+                          )}
                         </div>
                       </div>
 
@@ -250,6 +364,18 @@ export default function HistoryPage() {
                         }`}>
                           {item.use_gemma_analysis ? '✓' : '✗'} Análise IA
                         </span>
+                        {item.natural_language_input && (
+                          <span className="flex items-center gap-1 px-3 py-1 rounded-full bg-emerald-100 text-emerald-700">
+                            <FontAwesomeIcon icon={faBrain} className="text-xs" />
+                            Texto em linguagem natural
+                          </span>
+                        )}
+                        {item.extracted_symptoms && item.extracted_symptoms.length > 0 && (
+                          <span className="flex items-center gap-1 px-3 py-1 rounded-full bg-green-100 text-green-700">
+                            <FontAwesomeIcon icon={faStethoscope} className="text-xs" />
+                            {item.extracted_symptoms.length} sintoma{item.extracted_symptoms.length > 1 ? 's' : ''} extraído{item.extracted_symptoms.length > 1 ? 's' : ''}
+                          </span>
+                        )}
                         <span className="flex items-center gap-1 px-3 py-1 rounded-full bg-gray-100 text-gray-600">
                           <FontAwesomeIcon icon={faCalendarAlt} className="text-xs" />
                           {formatDate(item.timestamp)}

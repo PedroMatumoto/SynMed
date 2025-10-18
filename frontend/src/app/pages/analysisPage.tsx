@@ -9,18 +9,23 @@ import {
   faHistory,
   faSignOutAlt
 } from '@fortawesome/free-solid-svg-icons'
-import { DrugEffectRequest } from '../types/analysis'
+import { DrugEffectRequest, ExtractedSymptom } from '../types/analysis'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { ToastContainer } from '../components/ui/toastContainer'
 
 export default function AnalysisPage() {
   const { user, logout } = useAuth()
-  const { currentAnalysis, loading, error, toasts, searchDrugs, analyzeEffect } = useAnalysis()
+  const { currentAnalysis, loading, error, toasts, searchDrugs, extractSymptoms, analyzeEffect } = useAnalysis()
   const navigate = useNavigate()
 
   const [drugName, setDrugName] = useState('')
   const [effectSymptom, setEffectSymptom] = useState('')
+  const [naturalLanguageText, setNaturalLanguageText] = useState('')
+  const [symptoms, setSymptoms] = useState<string[]>([''])
+  const [inputMode, setInputMode] = useState<'single' | 'multiple' | 'natural'>('single')
+  const [extractedSymptoms, setExtractedSymptoms] = useState<ExtractedSymptom[]>([])
+  const [extracting, setExtracting] = useState(false)
   const [useSemanticSearch, setUseSemanticSearch] = useState(true)
   const [useGemmaAnalysis, setUseGemmaAnalysis] = useState(true)
   const [suggestions, setSuggestions] = useState<string[]>([])
@@ -48,20 +53,101 @@ export default function AnalysisPage() {
     return () => clearTimeout(timeoutId)
   }, [drugName, useSemanticSearch, searchDrugs, suggestionSelected])
 
-  async function handleAnalysis() {
-    if (!drugName || !effectSymptom) {
-      toasts.showWarning(
-        'Campos obrigatórios',
-        'Por favor, preencha o nome do medicamento e o sintoma'
-      )
+  async function handleExtractSymptoms() {
+    if (!naturalLanguageText.trim()) {
+      toasts.showWarning('Campo obrigatório', 'Por favor, digite o texto com os sintomas')
       return
     }
 
-    const request: DrugEffectRequest = {
-      drug_name: drugName,
-      effect_symptom: effectSymptom,
-      use_semantic_search: useSemanticSearch,
-      use_gemma_analysis: useGemmaAnalysis
+    setExtracting(true)
+    try {
+      const extracted = await extractSymptoms(naturalLanguageText)
+      setExtractedSymptoms(extracted)
+      
+      if (extracted.length === 0) {
+        toasts.showWarning(
+          'Nenhum sintoma encontrado',
+          'Não foi possível extrair sintomas do texto fornecido. Tente ser mais específico.'
+        )
+      } else {
+        toasts.showSuccess(
+          'Sintomas extraídos!',
+          `Encontrados ${extracted.length} sintoma(s) no texto.`
+        )
+      }
+    } catch (err) {
+      console.error('Error extracting symptoms:', err)
+      toasts.showError('Erro na extração', 'Não foi possível extrair os sintomas do texto.')
+    } finally {
+      setExtracting(false)
+    }
+  }
+
+  function addSymptomInput() {
+    setSymptoms([...symptoms, ''])
+  }
+
+  function removeSymptomInput(index: number) {
+    if (symptoms.length > 1) {
+      const newSymptoms = symptoms.filter((_, i) => i !== index)
+      setSymptoms(newSymptoms)
+    }
+  }
+
+  function updateSymptom(index: number, value: string) {
+    const newSymptoms = [...symptoms]
+    newSymptoms[index] = value
+    setSymptoms(newSymptoms)
+  }
+
+  async function handleAnalysis() {
+    if (!drugName.trim()) {
+      toasts.showWarning('Campo obrigatório', 'Por favor, preencha o nome do medicamento')
+      return
+    }
+
+    let request: DrugEffectRequest
+
+    if (inputMode === 'natural') {
+      if (!naturalLanguageText.trim()) {
+        toasts.showWarning('Campo obrigatório', 'Por favor, descreva seus sintomas')
+        return
+      }
+      
+      request = {
+        drug_name: drugName,
+        effect_symptom: naturalLanguageText, // Para compatibilidade
+        natural_language_text: naturalLanguageText,
+        use_semantic_search: useSemanticSearch,
+        use_gemma_analysis: useGemmaAnalysis
+      }
+    } else if (inputMode === 'multiple') {
+      const validSymptoms = symptoms.filter(s => s.trim())
+      if (validSymptoms.length === 0) {
+        toasts.showWarning('Campo obrigatório', 'Por favor, preencha pelo menos um sintoma')
+        return
+      }
+      
+      request = {
+        drug_name: drugName,
+        effect_symptom: validSymptoms[0], // Para compatibilidade
+        symptoms: validSymptoms,
+        use_semantic_search: useSemanticSearch,
+        use_gemma_analysis: useGemmaAnalysis
+      }
+    } else {
+      // single mode
+      if (!effectSymptom.trim()) {
+        toasts.showWarning('Campo obrigatório', 'Por favor, preencha o sintoma')
+        return
+      }
+      
+      request = {
+        drug_name: drugName,
+        effect_symptom: effectSymptom,
+        use_semantic_search: useSemanticSearch,
+        use_gemma_analysis: useGemmaAnalysis
+      }
     }
 
     try {
@@ -165,18 +251,160 @@ export default function AnalysisPage() {
               </div>
             </div>
 
+            {/* Seletor de modo de entrada */}
             <div className="mb-6">
               <label className="mb-3 block text-lg font-semibold text-dark-800">
-                🔍 Sintoma ou Efeito Observado
+                ❓ Como você quer informar os sintomas?
               </label>
-              <textarea
-                value={effectSymptom}
-                onChange={(e) => setEffectSymptom(e.target.value)}
-                className="w-full rounded-xl border-2 border-dark-200 bg-white px-4 py-4 text-lg outline-none transition-all focus:border-accent focus:shadow-lg focus:bg-white resize-none"
-                placeholder="Descreva detalhadamente os sintomas que você está sentindo (ex: dor de cabeça intensa, náusea após as refeições, tontura ao levantar...)"
-                rows={4}
-              />
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <button
+                  type="button"
+                  onClick={() => setInputMode('single')}
+                  className={`p-4 rounded-xl border-2 text-left transition-all ${
+                    inputMode === 'single'
+                      ? 'border-accent bg-accent/10 text-accent font-semibold'
+                      : 'border-dark-200 bg-white text-dark-700 hover:border-accent/50'
+                  }`}
+                >
+                  <div className="font-medium">🎯 Sintoma único</div>
+                  <div className="text-sm opacity-75 mt-1">Um sintoma específico</div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setInputMode('multiple')}
+                  className={`p-4 rounded-xl border-2 text-left transition-all ${
+                    inputMode === 'multiple'
+                      ? 'border-accent bg-accent/10 text-accent font-semibold'
+                      : 'border-dark-200 bg-white text-dark-700 hover:border-accent/50'
+                  }`}
+                >
+                  <div className="font-medium">📋 Múltiplos sintomas</div>
+                  <div className="text-sm opacity-75 mt-1">Lista de sintomas</div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setInputMode('natural')}
+                  className={`p-4 rounded-xl border-2 text-left transition-all ${
+                    inputMode === 'natural'
+                      ? 'border-accent bg-accent/10 text-accent font-semibold'
+                      : 'border-dark-200 bg-white text-dark-700 hover:border-accent/50'
+                  }`}
+                >
+                  <div className="font-medium">💬 Texto livre</div>
+                  <div className="text-sm opacity-75 mt-1">Descreva naturalmente</div>
+                </button>
+              </div>
             </div>
+
+            {/* Entrada de sintoma único */}
+            {inputMode === 'single' && (
+              <div className="mb-6">
+                <label className="mb-3 block text-lg font-semibold text-dark-800">
+                  �🔍 Sintoma ou Efeito Observado
+                </label>
+                <textarea
+                  value={effectSymptom}
+                  onChange={(e) => setEffectSymptom(e.target.value)}
+                  className="w-full rounded-xl border-2 border-dark-200 bg-white px-4 py-4 text-lg outline-none transition-all focus:border-accent focus:shadow-lg focus:bg-white resize-none"
+                  placeholder="Ex: dor de cabeça, náusea, tontura..."
+                  rows={3}
+                />
+              </div>
+            )}
+
+            {/* Entrada de múltiplos sintomas */}
+            {inputMode === 'multiple' && (
+              <div className="mb-6">
+                <label className="mb-3 block text-lg font-semibold text-dark-800">
+                  📋 Lista de Sintomas
+                </label>
+                <div className="space-y-3">
+                  {symptoms.map((symptom, index) => (
+                    <div key={index} className="flex gap-2">
+                      <input
+                        type="text"
+                        value={symptom}
+                        onChange={(e) => updateSymptom(index, e.target.value)}
+                        className="flex-1 rounded-xl border-2 border-dark-200 bg-white px-4 py-3 text-lg outline-none transition-all focus:border-accent focus:shadow-lg"
+                        placeholder={`Sintoma ${index + 1}...`}
+                      />
+                      {symptoms.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => removeSymptomInput(index)}
+                          className="px-3 py-3 rounded-xl border-2 border-red-300 bg-red-50 text-red-600 hover:bg-red-100 transition-colors"
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={addSymptomInput}
+                    className="w-full py-3 rounded-xl border-2 border-dashed border-accent/50 text-accent hover:border-accent hover:bg-accent/5 transition-all"
+                  >
+                    + Adicionar sintoma
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Entrada de texto livre */}
+            {inputMode === 'natural' && (
+              <div className="mb-6">
+                <label className="mb-3 block text-lg font-semibold text-dark-800">
+                  💬 Descreva seus sintomas naturalmente
+                </label>
+                <textarea
+                  value={naturalLanguageText}
+                  onChange={(e) => setNaturalLanguageText(e.target.value)}
+                  className="w-full rounded-xl border-2 border-dark-200 bg-white px-4 py-4 text-lg outline-none transition-all focus:border-accent focus:shadow-lg focus:bg-white resize-none"
+                  placeholder="Ex: Depois de tomar o medicamento comecei a sentir uma dor de cabeça forte, náusea e tontura. Também percebi que fico mais sonolento durante o dia..."
+                  rows={5}
+                />
+                
+                {naturalLanguageText.trim() && (
+                  <div className="mt-3">
+                    <button
+                      type="button"
+                      onClick={handleExtractSymptoms}
+                      disabled={extracting}
+                      className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-100 text-blue-700 border border-blue-200 hover:bg-blue-200 transition-colors disabled:opacity-50"
+                    >
+                      {extracting ? (
+                        <>
+                          <div className="w-4 h-4 animate-spin rounded-full border-2 border-blue-400 border-t-blue-700" />
+                          Extraindo sintomas...
+                        </>
+                      ) : (
+                        <>
+                          🔍 Extrair sintomas do texto
+                        </>
+                      )}
+                    </button>
+                  </div>
+                )}
+
+                {extractedSymptoms.length > 0 && (
+                  <div className="mt-4 p-4 rounded-xl bg-green-50 border border-green-200">
+                    <h4 className="font-semibold text-green-800 mb-3">✅ Sintomas identificados:</h4>
+                    <div className="space-y-2">
+                      {extractedSymptoms.map((symptom, index) => (
+                        <div key={index} className="flex items-center gap-3 p-2 rounded-lg bg-white border border-green-200">
+                          <span className="flex-1 text-green-700">{symptom.text}</span>
+                          <span className="text-sm text-green-600 bg-green-100 px-2 py-1 rounded">
+                            {(symptom.confidence_score * 100).toFixed(0)}%
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="mb-8">
               <h3 className="mb-4 text-lg font-semibold text-dark-800">⚙️ Opções de Análise</h3>
@@ -211,7 +439,7 @@ export default function AnalysisPage() {
 
             <button
               onClick={handleAnalysis}
-              disabled={loading}
+              disabled={loading || extracting}
               className="group flex w-full items-center justify-center gap-4 rounded-xl bg-gradient-to-r from-accent to-accent/80 py-5 text-xl font-bold text-white transition-all duration-300 hover:from-accent/90 hover:to-accent/70 hover:scale-[1.02] hover:shadow-2xl disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:scale-100"
             >
               {loading ? (
@@ -258,31 +486,37 @@ export default function AnalysisPage() {
 
                 <div className="rounded-xl bg-dark-50 p-6 border border-dark-200">
                   <h4 className="font-semibold text-dark-800 mb-3 flex items-center gap-2">
-                    📊 Nível de Confiança
+                    📊 Nível de Confiança Geral
                   </h4>
                   <span
                     className={`inline-flex items-center rounded-full px-4 py-2 text-lg font-bold ${
-                      currentAnalysis.confidence === 'Alta'
+                      (currentAnalysis.overall_confidence || currentAnalysis.confidence) === 'Alta'
                         ? 'bg-green-100 text-green-700 border border-green-200'
-                        : currentAnalysis.confidence === 'Moderada'
+                        : (currentAnalysis.overall_confidence || currentAnalysis.confidence) === 'Moderada'
                           ? 'bg-yellow-100 text-yellow-700 border border-yellow-200'
                           : 'bg-red-100 text-red-700 border border-red-200'
                     }`}
                   >
-                    {currentAnalysis.confidence}
+                    {currentAnalysis.overall_confidence || currentAnalysis.confidence}
                   </span>
                 </div>
 
                 <div className="rounded-xl bg-dark-50 p-6 border border-dark-200">
                   <h4 className="font-semibold text-dark-800 mb-3 flex items-center gap-2">
-                    🎯 Sintoma Relatado
+                    🎯 Sintomas Analisados
                   </h4>
-                  <p className="text-dark-700">{currentAnalysis.user_effect}</p>
+                  {currentAnalysis.symptom_analyses && currentAnalysis.symptom_analyses.length > 1 ? (
+                    <p className="text-dark-700">
+                      <span className="font-semibold text-accent">{currentAnalysis.symptom_analyses.length}</span> sintomas múltiplos
+                    </p>
+                  ) : (
+                    <p className="text-dark-700">{currentAnalysis.user_effect}</p>
+                  )}
                 </div>
 
                 <div className="rounded-xl bg-dark-50 p-6 border border-dark-200">
                   <h4 className="font-semibold text-dark-800 mb-3 flex items-center gap-2">
-                    🔢 Score de Similaridade
+                    🔢 Score Médio
                   </h4>
                   <p className="text-2xl font-bold text-accent">
                     {(currentAnalysis.similarity_score * 100).toFixed(1)}%
@@ -298,6 +532,83 @@ export default function AnalysisPage() {
                   </div>
                 )}
               </div>
+
+              {/* Sintomas extraídos automaticamente */}
+              {currentAnalysis.extracted_symptoms && currentAnalysis.extracted_symptoms.length > 0 && (
+                <div className="mb-8">
+                  <h4 className="mb-4 text-2xl font-bold text-dark-800 flex items-center gap-2">
+                    🤖 Sintomas Extraídos Automaticamente
+                  </h4>
+                  <div className="rounded-xl bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-200 p-6">
+                    <div className="space-y-3">
+                      {currentAnalysis.extracted_symptoms.map((symptom, index) => (
+                        <div key={index} className="flex items-center justify-between p-3 bg-white rounded-lg border border-blue-200">
+                          <div className="flex flex-col">
+                            <span className="font-medium text-dark-800">{symptom.text}</span>
+                            <span className="text-sm text-blue-600 italic">"{symptom.source_span}"</span>
+                          </div>
+                          <span className="text-sm font-semibold text-blue-700 bg-blue-100 px-3 py-1 rounded-full">
+                            {(symptom.confidence_score * 100).toFixed(0)}%
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Análises individuais dos sintomas */}
+              {currentAnalysis.symptom_analyses && currentAnalysis.symptom_analyses.length > 1 && (
+                <div className="mb-8">
+                  <h4 className="mb-4 text-2xl font-bold text-dark-800 flex items-center gap-2">
+                    📊 Análise Individual dos Sintomas
+                  </h4>
+                  <div className="space-y-4">
+                    {currentAnalysis.symptom_analyses.map((symptomAnalysis, index) => (
+                      <div key={index} className="rounded-xl bg-gradient-to-br from-purple-50 to-purple-100 border border-purple-200 p-6">
+                        <div className="flex items-center justify-between mb-4">
+                          <h5 className="text-lg font-semibold text-dark-800">
+                            {index + 1}. {symptomAnalysis.original_symptom}
+                          </h5>
+                          <span
+                            className={`inline-flex items-center rounded-full px-3 py-1 text-sm font-bold ${
+                              symptomAnalysis.confidence === 'Alta'
+                                ? 'bg-green-100 text-green-700 border border-green-200'
+                                : symptomAnalysis.confidence === 'Moderada'
+                                  ? 'bg-yellow-100 text-yellow-700 border border-yellow-200'
+                                  : 'bg-red-100 text-red-700 border border-red-200'
+                            }`}
+                          >
+                            {symptomAnalysis.confidence}
+                          </span>
+                        </div>
+                        
+                        {symptomAnalysis.translated_symptom && (
+                          <div className="mb-3">
+                            <span className="text-sm text-purple-600">
+                              Traduzido: <em>{symptomAnalysis.translated_symptom}</em>
+                            </span>
+                          </div>
+                        )}
+
+                        {symptomAnalysis.similar_effects.length > 0 && (
+                          <div className="space-y-2">
+                            <span className="text-sm font-medium text-purple-700">Efeitos similares encontrados:</span>
+                            {symptomAnalysis.similar_effects.slice(0, 3).map((effect, effectIndex) => (
+                              <div key={effectIndex} className="flex items-center justify-between p-2 bg-white rounded-lg border border-purple-200">
+                                <span className="text-dark-700">{effect.effect_pt || effect.effect}</span>
+                                <span className="text-purple-700 font-semibold">
+                                  {(effect.similarity_score * 100).toFixed(1)}%
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {currentAnalysis.similar_effects.length > 0 && (
                 <div className="mb-8">
@@ -330,36 +641,6 @@ export default function AnalysisPage() {
                         </div>
                       </div>
                     ))}
-                  </div>
-                </div>
-              )}
-
-              {currentAnalysis.drug_info && (
-                <div className="mb-8">
-                  <h4 className="mb-4 text-2xl font-bold text-dark-800 flex items-center gap-2">
-                    ℹ️ Informações do Medicamento
-                  </h4>
-                  <div className="rounded-xl bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-200 p-6">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {currentAnalysis.drug_info.drug_class && (
-                        <div>
-                          <span className="font-semibold text-dark-800">Classe:</span>
-                          <p className="text-dark-700 mt-1">{currentAnalysis.drug_info.drug_class}</p>
-                        </div>
-                      )}
-                      {currentAnalysis.drug_info.side_effect_severity && (
-                        <div>
-                          <span className="font-semibold text-dark-800">Severidade:</span>
-                          <p className="text-dark-700 mt-1">{currentAnalysis.drug_info.side_effect_severity}</p>
-                        </div>
-                      )}
-                    </div>
-                    {currentAnalysis.drug_info.indications && (
-                      <div className="mt-4">
-                        <span className="font-semibold text-dark-800">Indicações:</span>
-                        <p className="text-dark-700 mt-1">{currentAnalysis.drug_info.indications}</p>
-                      </div>
-                    )}
                   </div>
                 </div>
               )}

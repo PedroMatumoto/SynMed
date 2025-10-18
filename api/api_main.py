@@ -1,12 +1,13 @@
 import re
 from fastapi import FastAPI, HTTPException, Depends, Query, Request
+from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from beanie import init_beanie
 import motor.motor_asyncio
 from .api_models import (
     User, UserCreate, UserLogin, UserResponse, Token, SearchHistory,
     DrugEffectRequest, DrugEffectResponse, SimilarEffect, DrugInfo,
-    EffectAnalysisHistory, DrugSearchResult
+    EffectAnalysisHistory, DrugSearchResult, ExtractedSymptom
 )
 from .api_auth import (
     get_password_hash, 
@@ -184,13 +185,30 @@ async def get_drug_effects(
         raise HTTPException(status_code=500, detail=f"Erro ao obter efeitos: {str(e)}")
 
 
+class ExtractSymptomsRequest(BaseModel):
+    text: str
+
+
+@app.post("/extract-symptoms")
+async def extract_symptoms(
+    request: ExtractSymptomsRequest,
+    current_user: Optional[User] = Depends(get_current_user_optional)
+) -> List[ExtractedSymptom]:
+    """Extrai sintomas de um texto em linguagem natural"""
+    try:
+        extracted = synmed_service.extract_symptoms_from_text(request.text)
+        return extracted
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro na extração: {str(e)}")
+
+
 @app.post("/analyze-effect", response_model=DrugEffectResponse)
 async def analyze_drug_effect(
     request: Request,
     analysis_request: DrugEffectRequest,
     current_user: Optional[User] = Depends(get_current_user_optional)
 ):
-    """Analisa se um sintoma pode ser efeito colateral de um medicamento"""
+    """Analisa se um ou múltiplos sintomas podem ser efeitos colaterais de um medicamento"""
     
     client_ip = request.client.host if request.client else "unknown"
     
@@ -219,60 +237,140 @@ async def analyze_drug_effect(
             )
         
         selected_drug = drug_matches[0].drug_name
-        
         known_effects = synmed_service.get_side_effects_for_drug(selected_drug)
-        
-        similar_effects, translated_effect, possible_translations = synmed_service.check_side_effect_similarity(
-            analysis_request.effect_symptom, known_effects
-        )
-        
         drug_info = synmed_service.get_drug_info(selected_drug)
         
-        similarity_score = similar_effects[0].similarity_score if similar_effects else 0.0
-        if similarity_score > 0.8:
-            confidence = "Alta"
-        elif similarity_score > 0.6:
-            confidence = "Moderada"
+        symptoms_to_analyze = []
+        extracted_symptoms = None
+        natural_language_input = None
+        
+        if analysis_request.natural_language_text and analysis_request.natural_language_text.strip():
+            natural_language_input = analysis_request.natural_language_text.strip()
+            extracted_symptoms = synmed_service.extract_symptoms_from_text(natural_language_input)
+            symptoms_to_analyze = [symptom.text for symptom in extracted_symptoms]
+            
+        elif analysis_request.symptoms:
+            symptoms_to_analyze = [s.strip() for s in analysis_request.symptoms if s.strip()]
+            
         else:
-            confidence = "Baixa"
+            symptoms_to_analyze = [analysis_request.effect_symptom.strip()]
         
-        basic_analysis = synmed_service.generate_basic_analysis(
-            selected_drug, analysis_request.effect_symptom, similar_effects,
-            drug_info, translated_effect, possible_translations
-        )
-        
-        gemma_analysis = None
-        if analysis_request.use_gemma_analysis:
-            gemma_analysis = synmed_service.generate_gemma_analysis(
-                selected_drug, analysis_request.effect_symptom, similar_effects,
-                drug_info, similarity_score, translated_effect
+        if not symptoms_to_analyze:
+            raise HTTPException(
+                status_code=400,
+                detail="Nenhum sintoma válido foi fornecido para análise"
             )
         
-        user_id = str(current_user.id) if current_user else f"anonymous:{client_ip}"
-        history_entry = EffectAnalysisHistory(
-            user_id=user_id,
-            drug_name=selected_drug,
-            effect_symptom=analysis_request.effect_symptom,
-            confidence=confidence,
-            similarity_score=similarity_score,
-            use_semantic_search=analysis_request.use_semantic_search,
-            use_gemma_analysis=analysis_request.use_gemma_analysis
-        )
-        await history_entry.create()
+        if len(symptoms_to_analyze) > 1:
+            symptom_analyses, overall_confidence, avg_similarity = synmed_service.analyze_multiple_symptoms(
+                selected_drug, symptoms_to_analyze, known_effects
+            )
+            
+            basic_analysis = synmed_service.generate_multi_symptom_analysis(
+                selected_drug, symptom_analyses, drug_info, overall_confidence
+            )
+            
+            gemma_analysis = None
+            if analysis_request.use_gemma_analysis:
+                gemma_analysis = synmed_service.generate_multi_symptom_gemma_analysis(
+                    selected_drug, symptom_analyses, drug_info, overall_confidence
+                )
+            
+            first_symptom = symptoms_to_analyze[0]
+            first_analysis = symptom_analyses[0] if symptom_analyses else None
+            
+            user_id = str(current_user.id) if current_user else f"anonymous:{client_ip}"
+            history_entry = EffectAnalysisHistory(
+                user_id=user_id,
+                drug_name=selected_drug,
+                effect_symptom=first_symptom,  # Para compatibilidade
+                symptoms=symptoms_to_analyze,
+                extracted_symptoms=extracted_symptoms,
+                natural_language_input=natural_language_input,
+                confidence=overall_confidence,
+                similarity_score=avg_similarity,
+                overall_confidence=overall_confidence,
+                use_semantic_search=analysis_request.use_semantic_search,
+                use_gemma_analysis=analysis_request.use_gemma_analysis
+            )
+            await history_entry.create()
+            
+            return DrugEffectResponse(
+                drug_name=selected_drug,
+                user_effect=first_symptom,  # Para compatibilidade
+                translated_effect=first_analysis.translated_symptom if first_analysis else None,
+                possible_translations=None,
+                similar_effects=first_analysis.similar_effects if first_analysis else [],
+                confidence=overall_confidence,
+                similarity_score=avg_similarity,
+                drug_info=drug_info,
+                basic_analysis=basic_analysis,
+                gemma_analysis=gemma_analysis,
+                all_known_effects=known_effects,
+                extracted_symptoms=extracted_symptoms,
+                symptom_analyses=symptom_analyses,
+                overall_confidence=overall_confidence
+            )
         
-        return DrugEffectResponse(
-            drug_name=selected_drug,
-            user_effect=analysis_request.effect_symptom,
-            translated_effect=translated_effect if translated_effect != analysis_request.effect_symptom else None,
-            possible_translations=possible_translations if possible_translations else None,
-            similar_effects=similar_effects,
-            confidence=confidence,
-            similarity_score=similarity_score,
-            drug_info=drug_info,
-            basic_analysis=basic_analysis,
-            gemma_analysis=gemma_analysis,
-            all_known_effects=known_effects
-        )
+        else:
+            single_symptom = symptoms_to_analyze[0]
+            
+            similar_effects, translated_effect, possible_translations = synmed_service.check_side_effect_similarity(
+                single_symptom, known_effects
+            )
+            
+            similarity_score = similar_effects[0].similarity_score if similar_effects else 0.0
+            if similarity_score > 0.8:
+                confidence = "Alta"
+            elif similarity_score > 0.6:
+                confidence = "Moderada"
+            else:
+                confidence = "Baixa"
+            
+            basic_analysis = synmed_service.generate_basic_analysis(
+                selected_drug, single_symptom, similar_effects,
+                drug_info, translated_effect, possible_translations
+            )
+            
+            gemma_analysis = None
+            if analysis_request.use_gemma_analysis:
+                gemma_analysis = synmed_service.generate_gemma_analysis(
+                    selected_drug, single_symptom, similar_effects,
+                    drug_info, similarity_score, translated_effect
+                )
+            
+            user_id = str(current_user.id) if current_user else f"anonymous:{client_ip}"
+            history_entry = EffectAnalysisHistory(
+                user_id=user_id,
+                drug_name=selected_drug,
+                effect_symptom=single_symptom,
+                symptoms=[single_symptom],
+                extracted_symptoms=extracted_symptoms,
+                natural_language_input=natural_language_input,
+                confidence=confidence,
+                similarity_score=similarity_score,
+                overall_confidence=confidence,
+                use_semantic_search=analysis_request.use_semantic_search,
+                use_gemma_analysis=analysis_request.use_gemma_analysis
+            )
+            await history_entry.create()
+            
+            return DrugEffectResponse(
+                drug_name=selected_drug,
+                user_effect=single_symptom,
+                translated_effect=translated_effect if translated_effect != single_symptom else None,
+                possible_translations=possible_translations if possible_translations else None,
+                similar_effects=similar_effects,
+                confidence=confidence,
+                similarity_score=similarity_score,
+                drug_info=drug_info,
+                basic_analysis=basic_analysis,
+                gemma_analysis=gemma_analysis,
+                all_known_effects=known_effects,
+                extracted_symptoms=extracted_symptoms,
+                symptom_analyses=None,
+                overall_confidence=confidence
+            )
         
     except HTTPException:
         raise
