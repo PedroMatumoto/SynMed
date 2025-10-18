@@ -55,3 +55,64 @@ input[type="checkbox"]:checked::after {
   content: '✓';
   @apply absolute inset-0 flex items-center justify-center text-white text-sm font-bold;
 }
+
+/* Custom prose styles for markdown */
+.prose {
+  @apply text-dark-700;
+}
+
+.prose h1, .prose h2, .prose h3, .prose h4, .prose h5, .prose h6 {
+  @apply text-dark-800 font-bold;
+}
+
+.prose h1 {
+  @apply text-2xl;
+}
+
+.prose h2 {
+  @apply text-xl;
+}
+
+.prose h3 {
+  @apply text-lg;
+}
+
+.prose strong {
+  @apply text-dark-800 font-bold;
+}
+
+.prose ul li::marker {
+  @apply text-accent;
+}
+
+.prose ol li::marker {
+  @apply text-accent;
+}
+
+.prose blockquote {
+  @apply border-l-4 border-accent bg-dark-50 pl-4 py-2 my-4 rounded-r;
+}
+
+.prose code {
+  @apply bg-dark-100 text-dark-800 px-1 py-0.5 rounded text-sm;
+}
+
+.prose pre {
+  @apply bg-dark-800 text-dark-100 p-4 rounded-xl overflow-x-auto;
+}
+
+.prose pre code {
+  @apply bg-transparent text-dark-100 p-0;
+}
+
+.prose table {
+  @apply border-collapse border border-dark-300;
+}
+
+.prose th, .prose td {
+  @apply border border-dark-300 px-3 py-2;
+}
+
+.prose th {
+  @apply bg-dark-100 font-semibold text-dark-800;
+}

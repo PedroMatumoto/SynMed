@@ -22,7 +22,8 @@ export default {
           400: '#94a3b8',
           300: '#cbd5e1',
           200: '#e2e8f0',
-          100: '#f1f5f9'
+          100: '#f1f5f9',
+          50: '#f8fafc'
         },
         cinzaEscuro: '#1e293b',
         cinzaClaro: '#f8fafc',
@@ -71,5 +72,5 @@ export default {
       }
     }
   },
-  plugins: []
+  plugins: [require('@tailwindcss/typography')]
 }

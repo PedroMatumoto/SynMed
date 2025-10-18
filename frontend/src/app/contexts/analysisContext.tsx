@@ -7,12 +7,14 @@ import {
 } from '../types/analysis'
 import { environments } from '@/utils/env/environments'
 import { useAuth } from './authContext'
+import { useToast } from '@/utils/useToast'
 
 interface AnalysisContextType {
   currentAnalysis: DrugEffectResponse | null
   analysisHistory: EffectAnalysisHistory[]
   loading: boolean
   error: string | null
+  toasts: ReturnType<typeof useToast>
   searchDrugs: (query: string, useSemanticSearch?: boolean) => Promise<DrugSearchResult[]>
   analyzeEffect: (request: DrugEffectRequest) => Promise<void>
   fetchHistory: () => Promise<void>
@@ -36,6 +38,7 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const { user } = useAuth()
+  const toasts = useToast()
 
   async function searchDrugs(
     query: string,
@@ -97,6 +100,13 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
 
       const data: DrugEffectResponse = await response.json()
       setCurrentAnalysis(data)
+
+      // Mostra toast de sucesso
+      toasts.showSuccess(
+        'Análise concluída com sucesso!',
+        `A análise do medicamento "${data.drug_name}" foi realizada.`,
+        6000
+      )
 
       // Atualiza o histórico se o usuário estiver logado
       if (user) {
@@ -182,6 +192,7 @@ export function AnalysisProvider({ children }: { children: ReactNode }) {
         analysisHistory,
         loading,
         error,
+        toasts,
         searchDrugs,
         analyzeEffect,
         fetchHistory,

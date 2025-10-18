@@ -10,10 +10,13 @@ import {
   faSignOutAlt
 } from '@fortawesome/free-solid-svg-icons'
 import { DrugEffectRequest } from '../types/analysis'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import { ToastContainer } from '../components/ui/toastContainer'
 
 export default function AnalysisPage() {
   const { user, logout } = useAuth()
-  const { currentAnalysis, loading, error, searchDrugs, analyzeEffect } = useAnalysis()
+  const { currentAnalysis, loading, error, toasts, searchDrugs, analyzeEffect } = useAnalysis()
   const navigate = useNavigate()
 
   const [drugName, setDrugName] = useState('')
@@ -22,9 +25,15 @@ export default function AnalysisPage() {
   const [useGemmaAnalysis, setUseGemmaAnalysis] = useState(true)
   const [suggestions, setSuggestions] = useState<string[]>([])
   const [showSuggestions, setShowSuggestions] = useState(false)
+  const [suggestionSelected, setSuggestionSelected] = useState(false)
 
   useEffect(() => {
     async function fetchSuggestions() {
+      // Não busca sugestões se uma sugestão foi selecionada recentemente
+      if (suggestionSelected) {
+        return
+      }
+      
       if (drugName.length >= 2) {
         const results = await searchDrugs(drugName, useSemanticSearch)
         setSuggestions(results.map((r) => r.drug_name).slice(0, 5))
@@ -37,11 +46,14 @@ export default function AnalysisPage() {
 
     const timeoutId = setTimeout(fetchSuggestions, 300)
     return () => clearTimeout(timeoutId)
-  }, [drugName, useSemanticSearch, searchDrugs])
+  }, [drugName, useSemanticSearch, searchDrugs, suggestionSelected])
 
   async function handleAnalysis() {
     if (!drugName || !effectSymptom) {
-      alert('Por favor, preencha o nome do medicamento e o sintoma')
+      toasts.showWarning(
+        'Campos obrigatórios',
+        'Por favor, preencha o nome do medicamento e o sintoma'
+      )
       return
     }
 
@@ -56,6 +68,10 @@ export default function AnalysisPage() {
       await analyzeEffect(request)
     } catch (err) {
       console.error('Error analyzing effect:', err)
+      toasts.showError(
+        'Erro na análise',
+        'Ocorreu um erro ao processar sua solicitação. Tente novamente.'
+      )
     }
   }
 
@@ -116,11 +132,17 @@ export default function AnalysisPage() {
                 <input
                   type="text"
                   value={drugName}
-                  onChange={(e) => setDrugName(e.target.value)}
-                  onFocus={() => setShowSuggestions(suggestions.length > 0)}
+                  onChange={(e) => {
+                    setDrugName(e.target.value)
+                    setSuggestionSelected(false) // Reset quando usuário digita
+                  }}
+                  onFocus={() => {
+                    setSuggestionSelected(false) // Reset quando usuário foca no campo
+                    setShowSuggestions(suggestions.length > 0)
+                  }}
                   onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
                   className="w-full rounded-xl border-2 border-dark-200 bg-white px-4 py-4 text-lg outline-none transition-all focus:border-accent focus:shadow-lg focus:bg-white"
-                  placeholder="Ex: Paracetamol, Ibuprofeno, Losartana..."
+                  placeholder="Ex: Amoxicilina, Losartana..."
                 />
 
                 {showSuggestions && suggestions.length > 0 && (
@@ -131,6 +153,7 @@ export default function AnalysisPage() {
                         onClick={() => {
                           setDrugName(suggestion)
                           setShowSuggestions(false)
+                          setSuggestionSelected(true) // Marca que uma sugestão foi selecionada
                         }}
                         className="cursor-pointer px-4 py-3 hover:bg-accent/10 transition-colors border-b border-dark-100 last:border-b-0"
                       >
@@ -284,7 +307,16 @@ export default function AnalysisPage() {
                   <div className="space-y-3">
                     {currentAnalysis.similar_effects.slice(0, 5).map((effect, index) => (
                       <div key={index} className="flex items-center justify-between rounded-xl bg-gradient-to-r from-accent/5 to-accent/10 border border-accent/20 p-4 hover:from-accent/10 hover:to-accent/15 transition-all">
-                        <span className="font-medium text-dark-800">{effect.effect}</span>
+                        <div className="flex flex-col">
+                          <span className="font-medium text-dark-800">
+                            {effect.effect_pt || effect.effect}
+                          </span>
+                          {effect.effect_pt && (
+                            <span className="text-sm text-dark-500 italic">
+                              Original: {effect.effect}
+                            </span>
+                          )}
+                        </div>
                         <div className="flex items-center gap-2">
                           <div className="w-20 h-2 bg-dark-200 rounded-full overflow-hidden">
                             <div 
@@ -337,8 +369,10 @@ export default function AnalysisPage() {
                   📋 Análise Básica
                 </h4>
                 <div className="rounded-xl bg-gradient-to-br from-green-50 to-green-100 border border-green-200 p-6">
-                  <div className="whitespace-pre-wrap text-dark-700 leading-relaxed">
-                    {currentAnalysis.basic_analysis}
+                  <div className="prose prose-sm max-w-none text-dark-700 leading-relaxed">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {currentAnalysis.basic_analysis}
+                    </ReactMarkdown>
                   </div>
                 </div>
               </div>
@@ -349,8 +383,10 @@ export default function AnalysisPage() {
                     🤖 Análise com IA (Gemma)
                   </h4>
                   <div className="rounded-xl bg-gradient-to-br from-purple-50 to-purple-100 border border-purple-200 p-6">
-                    <div className="whitespace-pre-wrap text-dark-700 leading-relaxed">
-                      {currentAnalysis.gemma_analysis}
+                    <div className="prose prose-sm max-w-none text-dark-700 leading-relaxed">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {currentAnalysis.gemma_analysis}
+                      </ReactMarkdown>
                     </div>
                   </div>
                 </div>
@@ -375,6 +411,12 @@ export default function AnalysisPage() {
           )}
         </div>
       </div>
+      
+      {/* Toast Container */}
+      <ToastContainer 
+        toasts={toasts.toasts} 
+        onClose={toasts.removeToast} 
+      />
     </div>
   )
 }

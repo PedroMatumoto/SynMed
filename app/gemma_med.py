@@ -221,6 +221,10 @@ INFORMAÇÕES DO CASO:
         prompt += """\n\nCom base nessas informações, forneça uma análise médica detalhada e estruturada incluindo:
 
 1. **Avaliação da Relação**: Avalie a probabilidade de o sintoma relatado ser um efeito colateral do medicamento (Alta/Média/Baixa)
+Não contradiza a similaridade apresentada pelo score de similaridade. A faixa de similaridade é:
+- Alta: acima de 0.8
+- Média: entre 0.6 e 0.8
+- Baixa: abaixo de 0.6
 2. **Mecanismo**: Explique brevemente o possível mecanismo farmacológico
 3. **Gravidade**: Classifique a gravidade do efeito (leve, moderado, grave)
 4. **Recomendações Práticas**: O que o paciente deve fazer

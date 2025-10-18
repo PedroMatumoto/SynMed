@@ -368,11 +368,6 @@ Recomendo consultar um médico ou farmacêutico para uma avaliação mais detalh
 **Efeito mais similar:** {best_match_display} (Similaridade: {similarity_score:.2f})
 **Confiança da análise:** {confidence}
 
-**Informações do medicamento:**
-- Classe: {drug_info.drug_class or 'N/A'}
-- Indicações: {drug_info.indications or 'N/A'}
-- Severidade típica: {drug_info.side_effect_severity or 'N/A'}
-
 **Recomendação:** {recommendation}
 
 **⚠️ Importante:** Este sistema é apenas informativo e não substitui orientação médica profissional.
